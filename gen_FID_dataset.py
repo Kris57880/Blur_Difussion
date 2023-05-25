@@ -1,4 +1,4 @@
-from Variant_1.diffusion_baseline_No_attention import GOPRO, ClassConditionedUnet
+from perception.perception import GOPRO, ClassConditionedUnet
 import torch
 from tqdm.auto import tqdm
 from matplotlib import pyplot as plt
@@ -8,13 +8,30 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from torch import nn
 from diffusers import DDIMScheduler,DDPMScheduler
+import os
 device = (
-    "cuda"
+    "cuda:3"
     if torch.cuda.is_available()
     else "cpu"
 )
 
-guidance_loss_scale = 30 
+root_dir = 'perception'
+gt_folder = root_dir+"/result/gt"
+pred_folder = root_dir+"/result/pred"
+
+# Check if gt_folder exists
+if not os.path.exists(gt_folder):
+    # Create gt_folder
+    os.makedirs(gt_folder)
+    print(f"{gt_folder} created.")
+
+# Check if pred_folder exists
+if not os.path.exists(pred_folder):
+    # Create pred_folder
+    os.makedirs(pred_folder)
+    print(f"{pred_folder} created.")
+
+guidance_loss_scale = np.concatenate((np.zeros(100),np.linspace(0,20,900)))
 def color_loss(images, target_color):
     """Given a target color (R, G, B) return a loss for how far away on average
     the images' pixels are from that color. Defaults to a light teal: (0.1, 0.9, 0.5)"""
@@ -35,13 +52,12 @@ def main():
     torch.manual_seed(87)
 
     # load model
-    root_dir = 'Baseline'
     net = ClassConditionedUnet()
-    net.load_state_dict(torch.load(root_dir+'/saved_model/best.pt'))
+    net.load_state_dict(torch.load(root_dir+'/saved_model/final.pt'),False)
 
     # load data
     image_size = 256
-    batch_size = 2
+    batch_size = 1
     num_workers = 0
     TEST_PATH = 'Dataset/test'
     test_dataset = GOPRO(mode='test')
@@ -70,10 +86,9 @@ def main():
         y = blur.to(device)
         gt = sharp
         for j, t in enumerate(noise_scheduler.timesteps):
-
+        
             # Prepare model input
             model_input = noise_scheduler.scale_model_input(x, t)
-
             # Get the prediction
             with torch.no_grad():
                 noise_pred = net(model_input, t, y)
@@ -85,7 +100,7 @@ def main():
             x0 = noise_scheduler.step(noise_pred, t, x).pred_original_sample
 
             # Calculate color loss
-            loss = color_loss(x0,y) * guidance_loss_scale
+            loss = color_loss(x0,y) * guidance_loss_scale[t]
             # if j % 100 == 0:
             #     print(j, "loss:", loss.item())
             # Get gradient
@@ -103,9 +118,9 @@ def main():
             if j == len(noise_scheduler.timesteps) - 1:
                 for im_x, im_gt in zip(x, gt):
                     im_x = to_pil(im_x.cpu().clip(-1, 1) * 0.5 + 0.5)
-                    im_x.save(root_dir+'/result/pred/%04d.png'% img_count, 'png')
+                    im_x.save(pred_folder+'/%04d.png'% img_count, 'png')
                     im_gt = to_pil(im_gt.cpu().clip(-1, 1) * 0.5 + 0.5)
-                    im_gt.save(root_dir+'/result/gt/%04d.png' % img_count, 'png')
+                    im_gt.save(gt_folder+'/%04d.png' % img_count, 'png')
                     img_count += 1
 
 
